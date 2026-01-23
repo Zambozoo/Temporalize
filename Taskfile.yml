@@ -1,0 +1,38 @@
+version: '3'
+
+dotenv: ['.env']
+
+tasks:
+  default:
+    cmds:
+      - task --list
+
+  collect:
+    desc: Collect top Spotify songs by popularity
+    vars:
+      OUTPUT: '{{default "spotify_links.json" .OUTPUT}}'
+      START: '{{default "1970" .START}}'
+      END: '{{default "2025" .END}}'
+    cmds:
+      - go run cmd/collect/main.go -output {{.OUTPUT}} -start {{.START}} -end {{.END}}
+
+  generate:
+    desc: Generate all assets (metadata, thumbnails, links, images)
+    vars:
+      INPUT: '{{default "spotify_links.json" .INPUT}}'
+      OUTPUT: '{{default "assets/generated" .OUTPUT}}'
+    cmds:
+      - go run cmd/generate/*.go -input {{.INPUT}} -output {{.OUTPUT}}
+
+  links:
+    desc: Run the links validation script
+    cmds:
+      - go run cmd/links/main.go
+
+  web:
+    desc: Serve the web app
+    vars:
+      PORT: '{{default "8000" .PORT}}'
+    cmds:
+      - npx tsc web/app.ts --target es2015
+      - python3 web/serve_https.py {{.PORT}}

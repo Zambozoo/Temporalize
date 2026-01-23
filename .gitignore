@@ -1,0 +1,33 @@
+# System and IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Node / Web
+node_modules/
+web/*.js
+web/*.js.map
+
+# SSL Certificates
+*.pem
+
+# Generated Assets
+assets/cards/
+assets/qrcodes/
+assets/thumbnails/
+
+# Generated Data Files
+links.json
+links_fixed.json
+spotify_links.json
+assets/errors.txt
+
+# Test and Debug
+*_test.html
+test_*.png
+*.log
+debug/
+
+# Temporary/Scratch files
+test_input.json
+.env

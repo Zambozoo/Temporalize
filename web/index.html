@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temporalize Scanner</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Lobster&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #333;
+            font-family: 'Lobster', cursive;
+            font-size: 48px;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            margin: 10px 0;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        
+        /* Platform Buttons - Icon Only */
+        .platform-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            margin: 0;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.1s;
+            text-decoration: none; /* For <a> */
+            overflow: hidden; /* Crop image to circle */
+        }
+        
+        .platform-btn:active {
+            transform: scale(0.98);
+        }
+        
+        .btn-spotify { background-color: #1DB954; color: white; }
+        .btn-apple { background-color: #FA243C; color: white; }
+        .btn-amazon { background-color: #232F3E; color: white; }
+        .btn-youtube { background-color: #FF0000; color: white; }
+        
+        .icon {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        
+        #video-container {
+            width: 100%;
+            max-width: 400px; /* Limit size */
+            aspect-ratio: 1 / 1; /* Square */
+            margin: 0 auto;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            background: black;
+            display: none; /* Hidden until started */
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Fill square */
+            display: block;
+        }
+        canvas {
+            display: none;
+        }
+        
+        #result {
+            margin-top: 20px;
+            display: none; /* Hidden by default */
+        }
+        
+        .result-links {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            justify-items: center;
+            max-width: 200px;
+            margin: 0 auto;
+        }
+
+        #start-btn {
+            background-color: #333;
+            color: white;
+        }
+        .controls {
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .controls label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 16px;
+            color: #333;
+        }
+        .controls input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Temporalize</h1>
+        
+        <div id="scanner-view">
+            <button id="start-btn" onclick="startScanner()">Start Camera</button>
+            
+            <div id="video-container">
+                <video id="video" playsinline></video>
+                <canvas id="canvas"></canvas>
+            </div>
+            
+            <div class="controls">
+                <label>
+                    <input type="checkbox" id="allow-explicit">
+                    Allow Explicit Content
+                </label>
+            </div>
+            
+            <div id="result"></div>
+            
+            <button id="reset-btn" onclick="reset()" style="background: #ccc; color: #333; display: none;">Scan Again</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
