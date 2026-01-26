@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 
+	"strings"
+
 	"temporalize/internal/models"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -15,10 +17,21 @@ import (
 )
 
 const (
-	thumbnailDir = "assets/thumbnails"
+	thumbnailDir = "thumbnails"
 )
 
-func fetchMetadata(ctx context.Context, client *spotify.Client, spotifyID string) (*models.Song, error) {
+// mapping of genres to subgenres for collection/categorization
+func genreGroups() map[string][]string {
+	return map[string][]string{
+		"pop":     {"pop", "dance", "electro", "synth", "r&b", "soul", "disco"},
+		"rock":    {"rock", "metal", "punk", "indie", "alternative"},
+		"hip-hop": {"hip hop", "rap", "trap"},
+		"country": {"country", "folk", "americana", "bluegrass"},
+		"jazz":    {"jazz", "blues", "funk"},
+	}
+}
+
+func fetchMetadata(ctx context.Context, client *spotify.Client, spotifyID, genreHint string) (*models.Song, error) {
 	track, err := client.GetTrack(ctx, spotify.ID(spotifyID))
 	if err != nil {
 		return nil, err
@@ -36,12 +49,29 @@ func fetchMetadata(ctx context.Context, client *spotify.Client, spotifyID string
 		artists = append(artists, a.Name)
 	}
 
-	// Get Genre (from primary artist)
-	genre := "pop" // Default
-	if len(track.Artists) > 0 {
-		artist, err := client.GetArtist(ctx, track.Artists[0].ID)
-		if err == nil && len(artist.Genres) > 0 {
-			genre = artist.Genres[0]
+	// Get Genre
+	// If genreHint is provided and valid, use it.
+	// Otherwise try to infer from artist.
+	genre := genreHint
+	if genre == "" || genre == "default" {
+		genre = "default"
+		if len(track.Artists) > 0 {
+			artist, err := client.GetArtist(ctx, track.Artists[0].ID)
+			if err == nil && len(artist.Genres) > 0 {
+				rawGenre := artist.Genres[0]
+				// Map to our simplified genre groups
+				for group, subgenres := range genreGroups() {
+					for _, sg := range subgenres {
+						if strings.Contains(strings.ToLower(rawGenre), sg) {
+							genre = group
+							break
+						}
+					}
+					if genre != "default" {
+						break
+					}
+				}
+			}
 		}
 	}
 

@@ -12,12 +12,10 @@ import (
 const (
 	unitedStatesCountryKey = "US"
 
-	spotifyKey      = "spotify"
 	youtubeMusicKey = "youtubeMusic"
 	appleMusicKey   = "appleMusic"
 	amazonMusicKey  = "amazonMusic"
 
-	spotifyPrefix      = "https://open.spotify.com/track/"
 	youtubeMusicPrefix = "https://music.youtube.com/watch?v="
 	appleMusicPrefix   = "https://geo.music.apple.com/us/album/_/"
 	appleMusicInfo     = "?i="
@@ -30,9 +28,6 @@ type odesliResponse struct {
 	LinksByPlatform map[string]struct {
 		URL string `json:"url"`
 	} `json:"linksByPlatform"`
-	EntitiesByUniqueID map[string]struct {
-		Thumbnail string `json:"thumbnailUrl"`
-	} `json:"entitiesByUniqueId"`
 	Error string `json:"error"`
 }
 

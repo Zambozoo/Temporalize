@@ -81,5 +81,5 @@ The web app requires HTTPS to access the camera on mobile devices. The start scr
 
 ## QR Code Format
 The QR codes use a custom binary encoding to minimize size.
-Structure: `[ExplicitFlag (1 byte), AmazonAlbumID, AmazonSongID, AppleAlbumID, AppleSongID, SpotifyID, YouTubeID]`
-IDs are concatenated strings, but the first byte of each ID is offset by +128 to act as a delimiter to reduce the size of the QR code.
+Structure: `[AmazonAlbumID+Explicit (7 bytes), AmazonSongID (7 bytes), AppleAlbumID (Uvarint), AppleSongID (Varint Delta), SpotifyID (17 bytes), YouTubeID (9 bytes)]`
+IDs are compressed using custom BaseN encoding (Base36/Base62/Base64) and packed into a binary format. The explicit flag is stored in the most significant bit of the first byte.

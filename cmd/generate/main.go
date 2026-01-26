@@ -1,185 +1,152 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+	"net/url"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/hashicorp/go-retryablehttp"
-	"github.com/zmb3/spotify/v2"
-	spotifyauth "github.com/zmb3/spotify/v2/auth"
-	"golang.org/x/oauth2/clientcredentials"
+	"temporalize/internal/models"
 )
-
-var (
-	spotifyClientID     = os.Getenv("SPOTIFY_CLIENT_ID")
-	spotifyClientSecret = os.Getenv("SPOTIFY_CLIENT_SECRET")
-)
-
-type Config struct {
-	InputFile  string
-	OutputDir  string
-	RetryCount int
-}
 
 func main() {
-	inputFile := flag.String("input", "spotify_links.json", "Path to JSON file containing Spotify links")
+	inputFile := flag.String("input", "lookup.json", "Path to input JSON file")
 	outputDir := flag.String("output", "assets/generated", "Output directory for generated assets")
 	flag.Parse()
 
 	if err := run(*inputFile, *outputDir); err != nil {
-		log.Fatalf("Error: %v", err)
+		panic(err)
 	}
 }
 
 func run(inputFile, outputDir string) error {
-	if spotifyClientID == "" || spotifyClientSecret == "" {
-		return fmt.Errorf("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables must be set")
-	}
-
-	// 1. Setup Clients
-	ctx := context.Background()
-	spotifyClient, err := setupSpotifyClient(ctx)
+	// Read Generated Songs
+	genSongs, err := readGeneratedSongs(inputFile)
 	if err != nil {
-		return fmt.Errorf("failed to setup spotify client: %w", err)
+		return fmt.Errorf("failed to read generated songs: %w", err)
 	}
 
-	retryClient := retryablehttp.NewClient()
-	retryClient.RetryMax = 5
-	retryClient.Logger = nil
-	retryClient.HTTPClient.Timeout = 15 * time.Second
+	fmt.Printf("Loaded %d songs from %s\n", len(genSongs), inputFile)
 
-	// 2. Read Input
-	links, err := readInputLinks(inputFile)
-	if err != nil {
-		return fmt.Errorf("failed to read input file: %w", err)
-	}
-
-	fmt.Printf("Loaded %d links from %s\n", len(links), inputFile)
-
-	// 3. Process Each Link
-	for i, link := range links {
-		fmt.Printf("[%d/%d] Processing %s...\n", i+1, len(links), link)
-
-		// A. Parse Spotify ID
-		spotifyID := parseSpotifyID(link)
-		if spotifyID == "" {
-			log.Printf("  -> Invalid Spotify link: %s", link)
+	for i, genSong := range genSongs {
+		if genSong.Invalid {
 			continue
 		}
 
-		// B. Fetch Metadata (Spotify)
-		song, err := fetchMetadata(ctx, spotifyClient, spotifyID)
-		if err != nil {
-			log.Printf("  -> Failed to fetch metadata: %v", err)
-			continue
+		fmt.Printf("[%d/%d] Generating assets for %s...\n", i+1, len(genSongs), genSong.Title)
+
+		// Convert back to models.Song
+		song := &models.Song{
+			Title:        genSong.Title,
+			Artists:      genSong.Artists,
+			Year:         genSong.Year,
+			Explicit:     genSong.Explicit,
+			Genre:        genSong.Genre,
+			ThumbnailURL: genSong.ThumbnailURL,
+			Spotify:      extractSpotifyID(genSong.Spotify),
+			AppleMusic:   extractAppleMusicID(genSong.AppleMusic),
+			AmazonMusic:  extractAmazonMusicID(genSong.AmazonMusic),
+			YoutubeMusic: extractYoutubeMusicID(genSong.YoutubeMusic),
 		}
-		fmt.Printf("  -> Metadata: %s - %s (%d)\n", song.Title, song.Artists[0], song.Year)
-
-		// C. Fetch Thumbnail
-		if err := fetchThumbnail(retryClient, song); err != nil {
-			log.Printf("  -> Failed to fetch thumbnail: %v", err)
-			// Continue? Or fail? Let's continue but maybe skip image generation if critical
-		} else {
-			fmt.Println("  -> Thumbnail fetched")
-		}
-
-		// D. Fetch Other Links (Odesli)
-		linksMap, err := fetchLinks(retryClient, spotifyID)
-		if err != nil {
-			log.Printf("  -> Failed to fetch links: %v", err)
-			continue
-		}
-
-		// E. Validate & Fix Links
-		// Map Odesli links to our Song struct fields
-		song.AppleMusic = linksMap["appleMusic"]
-		song.AmazonMusic = linksMap["amazonMusic"]
-		song.YoutubeMusic = linksMap["youtubeMusic"]
-		song.Spotify = spotifyID // Ensure ID is set
-
-		// Fix logic (simplified version of cmd/fix/main.go)
-		fixLinks(retryClient, song)
 
 		// F. Generate Assets
 		// 1. QR Code
-		if err := generateQRCode(song, outputDir); err != nil {
-			log.Printf("  -> Failed to generate QR code: %v", err)
-		} else {
-			fmt.Println("  -> QR Code generated")
+		qrImg, err := createQRCodeImage(song)
+		if err != nil {
+			fmt.Printf("  -> Failed to generate QR code: %v\n", err)
+			continue
 		}
 
 		// 2. Card Front
 		if err := generateCardFront(song, outputDir); err != nil {
-			log.Printf("  -> Failed to generate Card Front: %v", err)
-		} else {
-			fmt.Println("  -> Card Front generated")
+			fmt.Printf("  -> Failed to generate Card Front: %v\n", err)
+			continue
 		}
 
 		// 3. Card Back
-		if err := generateCardBack(song, outputDir); err != nil {
-			log.Printf("  -> Failed to generate Card Back: %v", err)
-		} else {
-			fmt.Println("  -> Card Back generated")
+		if err := generateCardBack(song, qrImg, outputDir); err != nil {
+			fmt.Printf("  -> Failed to generate Card Back: %v\n", err)
+			continue
 		}
 	}
-
 	return nil
 }
 
-func setupSpotifyClient(ctx context.Context) (*spotify.Client, error) {
-	config := &clientcredentials.Config{
-		ClientID:     spotifyClientID,
-		ClientSecret: spotifyClientSecret,
-		TokenURL:     spotifyauth.TokenURL,
-	}
-	token, err := config.Token(ctx)
-	if err != nil {
-		return nil, err
-	}
-	httpClient := spotifyauth.New().Client(ctx, token)
-	return spotify.New(httpClient), nil
-}
-
-func readInputLinks(path string) ([]string, error) {
+func readGeneratedSongs(path string) ([]models.GeneratedSong, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	var links []string
-	if err := json.NewDecoder(f).Decode(&links); err != nil {
+	var songs []models.GeneratedSong
+	if err := json.NewDecoder(f).Decode(&songs); err != nil {
 		return nil, err
 	}
-	return links, nil
+	return songs, nil
 }
 
-func parseSpotifyID(link string) string {
-	// Handle URL: https://open.spotify.com/track/ID?si=...
-	// Handle URI: spotify:track:ID
-	if strings.HasPrefix(link, "spotify:track:") {
-		return strings.TrimPrefix(link, "spotify:track:")
-	}
-	if strings.Contains(link, "/track/") {
-		parts := strings.Split(link, "/track/")
-		if len(parts) > 1 {
-			idPart := parts[1]
-			// Remove query params
-			if idx := strings.Index(idPart, "?"); idx != -1 {
-				return idPart[:idx]
-			}
-			return idPart
-		}
-	}
-	// Assume it might be just the ID if alphanumeric and length 22
-	if len(link) == 22 {
-		return link
+// Extraction Helpers
+
+func extractSpotifyID(link string) string {
+	// Expected: https://open.spotify.com/track/<ID>
+	prefix := "https://open.spotify.com/track/"
+	if strings.HasPrefix(link, prefix) {
+		return strings.TrimPrefix(link, prefix)
 	}
 	return ""
+}
+
+func extractAppleMusicID(link string) string {
+	// Expected: https://music.apple.com/us/album/_/<AlbumID>?i=<TrackID>
+	// Output: <AlbumID>:<TrackID>
+	u, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	trackID := u.Query().Get("i")
+
+	// Extract Album ID from path
+	// Path is /us/album/_/<AlbumID>
+	parts := strings.Split(u.Path, "/")
+	if len(parts) > 0 {
+		albumID := parts[len(parts)-1]
+		if albumID != "" && trackID != "" {
+			return fmt.Sprintf("%s:%s", albumID, trackID)
+		}
+	}
+	return ""
+}
+
+func extractAmazonMusicID(link string) string {
+	// Expected: https://music.amazon.com/albums/<AlbumASIN>?trackAsin=<TrackASIN>
+	// Output: <AlbumASIN>:<TrackASIN>
+	u, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	trackASIN := u.Query().Get("trackAsin")
+
+	// Extract Album ASIN from path
+	// Path is /albums/<AlbumASIN>
+	parts := strings.Split(u.Path, "/")
+	if len(parts) > 0 {
+		albumASIN := parts[len(parts)-1]
+		if albumASIN != "" && trackASIN != "" {
+			return fmt.Sprintf("%s:%s", albumASIN, trackASIN)
+		}
+	}
+	return ""
+}
+
+func extractYoutubeMusicID(link string) string {
+	// Expected: https://music.youtube.com/watch?v=<VideoID>
+	// Output: <VideoID>
+	u, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("v")
 }

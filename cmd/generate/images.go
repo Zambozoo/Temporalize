@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
@@ -20,7 +21,6 @@ import (
 )
 
 const (
-	qrcodeDirName       = "qrcodes"
 	outDirStdFrontName  = "cards/front/standard"
 	outDirStdBackName   = "cards/back/standard"
 	outDirMiniFrontName = "cards/front/usmini"
@@ -89,47 +89,38 @@ var genreThemes = map[string]GenreTheme{
 	"default": {Light: LightGray, Dark: DarkGray, Icon: ""},
 }
 
-func generateQRCode(s *models.Song, outputDir string) error {
-	qrDir := filepath.Join(outputDir, qrcodeDirName)
-	if err := os.MkdirAll(qrDir, 0755); err != nil {
-		return err
-	}
-	filename := fmt.Sprintf("%s/%s.png", qrDir, s.FileName())
-
-	var ids []string
+func createQRCodeImage(s *models.Song) (image.Image, error) {
+	var amzAlb, amzTrk, appAlb, appTrk string
 	if s.AmazonMusic != "" {
-		ids = append(ids, strings.Split(s.AmazonMusic, ":")...)
+		parts := strings.Split(s.AmazonMusic, ":")
+		if len(parts) >= 1 {
+			amzAlb = parts[0]
+		}
+		if len(parts) >= 2 {
+			amzTrk = parts[1]
+		}
 	}
 	if s.AppleMusic != "" {
-		ids = append(ids, strings.Split(s.AppleMusic, ":")...)
-	}
-	if s.Spotify != "" {
-		ids = append(ids, s.Spotify)
-	}
-	if s.YoutubeMusic != "" {
-		ids = append(ids, s.YoutubeMusic)
-	}
-
-	qrBytes := qrCodeBytes(s.Explicit, ids...)
-	return qrcode.WriteFile(string(qrBytes), qrcode.Medium, 256, filename)
-}
-
-func qrCodeBytes(explicit bool, strs ...string) []byte {
-	var bytes []byte
-	if explicit {
-		bytes = append(bytes, 1)
-	} else {
-		bytes = append(bytes, 0)
-	}
-	for _, s := range strs {
-		if len(s) == 0 {
-			continue
+		parts := strings.Split(s.AppleMusic, ":")
+		if len(parts) >= 1 {
+			appAlb = parts[0]
 		}
-		b := []byte(s)
-		b[0] = byte(int(b[0]) + 128)
-		bytes = append(bytes, b...)
+		if len(parts) >= 2 {
+			appTrk = parts[1]
+		}
 	}
-	return bytes
+
+	qrBytes, err := compress(s.Explicit, amzAlb, amzTrk, appAlb, appTrk, s.Spotify, s.YoutubeMusic)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compress qr data: %w", err)
+	}
+
+	pngBytes, err := qrcode.Encode(string(qrBytes), qrcode.Low, 256)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode qr code: %w", err)
+	}
+
+	return png.Decode(bytes.NewReader(pngBytes))
 }
 
 func generateCardFront(s *models.Song, outputDir string) error {
@@ -172,7 +163,7 @@ func drawFront(s *models.Song, widthIn, heightIn float64, outDir string) error {
 	dc.SetColor(theme.Dark)
 	dc.Clear()
 
-	thumbPath := filepath.Join("assets/thumbnails", s.FileName()+".jpeg")
+	thumbPath := filepath.Join("thumbnails", s.FileName()+".jpeg")
 	img, err := gg.LoadImage(thumbPath)
 	if err != nil {
 		return fmt.Errorf("failed to load thumbnail %s: %w", thumbPath, err)
@@ -335,7 +326,7 @@ func drawFront(s *models.Song, widthIn, heightIn float64, outDir string) error {
 	return dc.SavePNG(outPath)
 }
 
-func generateCardBack(s *models.Song, outputDir string) error {
+func generateCardBack(s *models.Song, qrImg image.Image, outputDir string) error {
 	stdDir := filepath.Join(outputDir, outDirStdBackName)
 	miniDir := filepath.Join(outputDir, outDirMiniBackName)
 
@@ -346,21 +337,10 @@ func generateCardBack(s *models.Song, outputDir string) error {
 		return err
 	}
 
-	qrPath := filepath.Join(outputDir, qrcodeDirName, s.FileName()+".png")
-	f, err := os.Open(qrPath)
-	if err != nil {
+	if err := drawBack(qrImg, stdWidth, stdHeight, filepath.Join(stdDir, s.FileName()+".png")); err != nil {
 		return err
 	}
-	defer f.Close()
-	srcImg, err := png.Decode(f)
-	if err != nil {
-		return err
-	}
-
-	if err := drawBack(srcImg, stdWidth, stdHeight, filepath.Join(stdDir, s.FileName()+".png")); err != nil {
-		return err
-	}
-	return drawBack(srcImg, miniWidth, miniHeight, filepath.Join(miniDir, s.FileName()+".png"))
+	return drawBack(qrImg, miniWidth, miniHeight, filepath.Join(miniDir, s.FileName()+".png"))
 }
 
 func drawBack(qrImg image.Image, widthIn, heightIn float64, outPath string) error {

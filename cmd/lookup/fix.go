@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -22,22 +23,30 @@ const (
 	amazonSearch   = "https://www.amazon.com/s"
 )
 
-var cleanPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\s-\s\d{4}\sRemaster`),
-	regexp.MustCompile(`(?i)\s-\sRemastered\s\d{4}`),
-	regexp.MustCompile(`(?i)\s-\sRemastered`),
-	regexp.MustCompile(`(?i)\s-\sRemaster`),
-	regexp.MustCompile(`(?i)\s\(Remastered\)`),
-	regexp.MustCompile(`(?i)\s\(Remaster\)`),
-	regexp.MustCompile(`(?i)\s-\sRadio Edit`),
-	regexp.MustCompile(`(?i)\s\(Radio Edit\)`),
-	regexp.MustCompile(`(?i)\s-\sLive$`),
-	regexp.MustCompile(`(?i)\s\(Live\)$`),
-	regexp.MustCompile(`(?i)\s-\sMono`),
-	regexp.MustCompile(`(?i)\s-\sStereo`),
-	regexp.MustCompile(`(?i)\s-\s\d{4}\sMix`),
-	regexp.MustCompile(`(?i)\s\(\d{4}\sRemaster\)`),
-}
+var (
+	cleanPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\s-\s.*Remaster.*`),
+		regexp.MustCompile(`(?i)\s\(.*Remaster.*\)`),
+		regexp.MustCompile(`(?i)\s-\s.*Mix.*`),
+		regexp.MustCompile(`(?i)\s\(.*Mix.*\)`),
+		regexp.MustCompile(`(?i)\s-\s.*Radio.*`),
+		regexp.MustCompile(`(?i)\s\(.*Radio.*\)`),
+		regexp.MustCompile(`(?i)\s-\s.*Live.*`),
+		regexp.MustCompile(`(?i)\s\(.*Live.*\)`),
+		regexp.MustCompile(`(?i)\s-\s.*Mono.*`),
+		regexp.MustCompile(`(?i)\s\(.*Mono.*\)`),
+		regexp.MustCompile(`(?i)\s-\s.*Stereo.*`),
+		regexp.MustCompile(`(?i)\s\(.*Stereo.*\)`),
+		regexp.MustCompile(`(?i)\s-\s.*Feat.*`),
+		regexp.MustCompile(`(?i)\s\(.*Feat.*\)`),
+		regexp.MustCompile(`(?i)\s-\s.*Ft\..*`),
+		regexp.MustCompile(`(?i)\s\(.*Ft\..*\)`),
+		regexp.MustCompile(`(?i)\s-\s.*Version\..*`),
+		regexp.MustCompile(`(?i)\s\(.*Version\..*\)`),
+	}
+
+	errNoResults = errors.New("no results")
+)
 
 func cleanTitle(title string) string {
 	newTitle := title
@@ -53,50 +62,54 @@ func normalize(s string) string {
 	return s
 }
 
-func fixLinks(client *retryablehttp.Client, song *models.Song) {
+func fixLinks(client *retryablehttp.Client, song *models.Song) bool {
+	isValid := true
 	// Apple Music
-	if song.AppleMusic != "" {
-		// Reconstruct URL for validation
-		parts := strings.Split(song.AppleMusic, ":")
-		if len(parts) == 2 {
-			url := fmt.Sprintf("https://music.apple.com/us/album/_/%s?i=%s", parts[0], parts[1])
-			if err := validatePageContent(client, url, song.Title, song.Artists[0]); err != nil {
-				fmt.Printf("  -> Apple Music invalid (%v). Fixing...\n", err)
-				fixAppleMusic(client, song)
-			}
-		} else {
-			fixAppleMusic(client, song)
+	shouldFix := true
+	if parts := strings.Split(song.AppleMusic, ":"); len(parts) == 2 {
+		url := fmt.Sprintf("https://music.apple.com/us/album/_/%s?i=%s", parts[0], parts[1])
+		if err := validatePageContent(client, url, song.Title, song.Artists[0]); err == nil {
+			shouldFix = false
 		}
-	} else {
-		fixAppleMusic(client, song)
+	}
+	if shouldFix {
+		if err := fixAppleMusic(client, song); err != nil {
+			isValid = false
+			fmt.Printf("Failed to fix Apple Music link for %s\n", song.Title)
+		}
 	}
 
+	shouldFix = true
 	// Amazon Music
-	if song.AmazonMusic != "" {
-		parts := strings.Split(song.AmazonMusic, ":")
-		if len(parts) == 2 {
-			url := fmt.Sprintf("https://music.amazon.com/embed/%s", parts[1])
-			if err := validatePageContent(client, url, song.Title, song.Artists[0]); err != nil {
-				fmt.Printf("  -> Amazon Music invalid (%v). Fixing...\n", err)
-				fixAmazonMusic(client, song)
-			}
-		} else {
-			fixAmazonMusic(client, song)
+	if parts := strings.Split(song.AmazonMusic, ":"); len(parts) == 2 {
+		url := fmt.Sprintf("https://music.amazon.com/embed/%s", parts[1])
+		if err := validatePageContent(client, url, song.Title, song.Artists[0]); err == nil {
+			shouldFix = false
 		}
-	} else {
-		fixAmazonMusic(client, song)
+	}
+	if shouldFix {
+		if err := fixAmazonMusic(client, song); err != nil {
+			isValid = false
+			fmt.Printf("Failed to fix Amazon Music link for %s\n", song.Title)
+		}
 	}
 
 	// YouTube Music
-	if song.YoutubeMusic != "" {
-		url := "https://music.youtube.com/watch?v=" + song.YoutubeMusic
-		if err := validateYoutubeViaOEmbed(client, url, song.Title, song.Artists[0]); err != nil {
-			fmt.Printf("  -> YouTube Music invalid (%v). Fixing...\n", err)
-			fixYoutubeMusic(client, song)
+	shouldFix = true
+	if parts := strings.Split(song.YoutubeMusic, ":"); len(parts) == 2 {
+		url := "https://music.youtube.com/watch?v=" + parts[1]
+		if err := validateYoutubeViaOEmbed(client, url, song.Title, song.Artists[0]); err == nil {
+			shouldFix = false
 		}
-	} else {
-		fixYoutubeMusic(client, song)
 	}
+	if shouldFix {
+		if err := fixYoutubeMusic(client, song); err != nil {
+			isValid = false
+			fmt.Printf("Failed to fix YouTube Music link for %s\n", song.Title)
+		}
+	}
+
+	return isValid
 }
 
 func validatePageContent(client *retryablehttp.Client, url, title, artist string) error {
@@ -146,29 +159,27 @@ func validatePageContent(client *retryablehttp.Client, url, title, artist string
 
 // --- Fixers ---
 
-func fixAppleMusic(client *retryablehttp.Client, song *models.Song) {
+func fixAppleMusic(client *retryablehttp.Client, song *models.Song) error {
 	cleanTitleVal := cleanTitle(song.Title)
 	candidates, err := searchAppleMusic(client, cleanTitleVal, song.Artists[0])
 	if err != nil {
-		fmt.Printf("    -> Apple Search failed: %v\n", err)
-		return
+		return err
 	}
 
 	for _, newLink := range candidates {
 		if err := validatePageContent(client, newLink, cleanTitleVal, song.Artists[0]); err == nil {
-			fmt.Printf("    -> Apple Fixed: %s\n", newLink)
 			song.AppleMusic = extractAppleIDs(newLink)
-			return
+			return nil
 		}
 	}
+	return errNoResults
 }
 
-func fixAmazonMusic(client *retryablehttp.Client, song *models.Song) {
+func fixAmazonMusic(client *retryablehttp.Client, song *models.Song) error {
 	cleanTitleVal := cleanTitle(song.Title)
 	candidates, err := searchAmazonMusic(client, cleanTitleVal, song.Artists[0])
 	if err != nil {
-		fmt.Printf("    -> Amazon Search failed: %v\n", err)
-		return
+		return err
 	}
 
 	for _, newLink := range candidates {
@@ -180,29 +191,29 @@ func fixAmazonMusic(client *retryablehttp.Client, song *models.Song) {
 		embedURL := fmt.Sprintf("https://music.amazon.com/embed/%s", asin)
 
 		if err := validatePageContent(client, embedURL, cleanTitleVal, song.Artists[0]); err == nil {
-			fmt.Printf("    -> Amazon Fixed: %s\n", newLink)
 			song.AmazonMusic = fmt.Sprintf("%s:%s", asin, asin)
-			return
+			return nil
 		}
 	}
+
+	return errNoResults
 }
 
-func fixYoutubeMusic(client *retryablehttp.Client, song *models.Song) {
+func fixYoutubeMusic(client *retryablehttp.Client, song *models.Song) error {
 	cleanTitleVal := cleanTitle(song.Title)
 	videoIDs, err := searchYoutube(client, cleanTitleVal, song.Artists[0])
 	if err != nil {
-		fmt.Printf("    -> YouTube Search failed: %v\n", err)
-		return
+		return err
 	}
 
 	for _, videoID := range videoIDs {
 		newLink := "https://music.youtube.com/watch?v=" + videoID
 		if err := validateYoutubeViaOEmbed(client, newLink, cleanTitleVal, song.Artists[0]); err == nil {
-			fmt.Printf("    -> YouTube Fixed: %s\n", newLink)
 			song.YoutubeMusic = videoID
-			return
+			return nil
 		}
 	}
+	return errNoResults
 }
 
 // --- Helpers ---
@@ -248,7 +259,7 @@ func searchAppleMusic(client *retryablehttp.Client, title, artist string) ([]str
 	if len(links) > 0 {
 		return links, nil
 	}
-	return nil, fmt.Errorf("no results")
+	return nil, errNoResults
 }
 
 func extractAppleIDs(link string) string {
@@ -324,7 +335,7 @@ func searchAmazonMusic(client *retryablehttp.Client, title, artist string) ([]st
 	if len(links) > 0 {
 		return links, nil
 	}
-	return nil, fmt.Errorf("no results")
+	return nil, errNoResults
 }
 
 func searchYoutube(client *retryablehttp.Client, title, artist string) ([]string, error) {
@@ -367,7 +378,7 @@ func searchYoutube(client *retryablehttp.Client, title, artist string) ([]string
 	if len(ids) > 0 {
 		return ids, nil
 	}
-	return nil, fmt.Errorf("no results")
+	return nil, errNoResults
 }
 
 func validateYoutubeViaOEmbed(client *retryablehttp.Client, url, title, artist string) error {
