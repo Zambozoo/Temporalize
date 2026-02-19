@@ -40,4 +40,9 @@ tasks:
       PORT: '{{default "8000" .PORT}}'
     cmds:
       - npx tsc web/app.ts --target es2020
-      - python3 web/serve_https.py {{.PORT}}
+      - DEV_MODE=true python3 web/serve_https.py {{.PORT}}
+
+  docker:build:
+    desc: Build the Docker image for the web app
+    cmds:
+      - docker build -t temporalize-web .
