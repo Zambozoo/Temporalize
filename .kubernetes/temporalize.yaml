@@ -35,8 +35,11 @@ spec:
         - containerPort: 8000
         resources:
           requests:
-            memory: "30Mi"
-            cpu: "50m"
+            memory: "100Mi"
+            cpu: "200m"
+        env:
+          - name: "PYTHON_UNBUFFERED"
+            value: "1"
 
 ---
 
@@ -47,7 +50,7 @@ metadata:
   namespace: temporalize
 spec:
   selector:
-    app: temporalize
+    app: temporalize-web
   ports:
     - name: http
       protocol: TCP
@@ -73,7 +76,7 @@ spec:
               service:
                 name: temporalize-web
                 port:
-                  number: 8000
+                  number: 80
 status:
   loadBalancer:
     ingress:
