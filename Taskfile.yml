@@ -46,3 +46,10 @@ tasks:
     desc: Build the Docker image for the web app
     cmds:
       - docker build -t temporalize-web .
+
+  docker:publish:
+    desc: Publish the Docker image to jbaldwin's docker registry
+    deps: [docker:build]
+    cmds:
+      - docker tag temporalize-web:latest docker-registry.service:30000/temporalize:latest
+      - docker push docker-registry.service:30000/temporalize:latest
